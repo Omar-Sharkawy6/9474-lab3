@@ -267,23 +267,79 @@ void Command::execute()
     pid = fork();
     if (pid == 0)
     {
-        if(_outFile)
+        if (_out_error)
         {
-            fd = open(_outFile, _append ? O_WRONLY | O_CREAT | O_APPEND : O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            fd = open(_errFile, O_WRONLY | O_CREAT | O_APPEND, 0644);
             if (fd == -1)
             {
-                perror("Error opening output file");
+                perror("Error opening error file");
                 _exit(EXIT_FAILURE);
             }
-            dup2(fd, 1);
+            if(dup2(fd, 1) == -1)
+            {
+                perror("Error duplicating file descriptor");
+                _exit(EXIT_FAILURE);
+            }
+            if(dup2(fd, 2) == -1)
+            {
+                perror("Error duplicating file descriptor");
+                _exit(EXIT_FAILURE);
+            }
             close(fd);
         }
-     if (execvp(_simpleCommands[0]->_arguments[0], _simpleCommands[0]->_arguments) == -1)
+        else
+        {
+            if (_outFile)
+            {
+                fd = open(_outFile, _append ? O_WRONLY | O_CREAT | O_APPEND : O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                if (fd == -1)
+                {
+                    perror("Error opening output file");
+                    _exit(EXIT_FAILURE);
+                }
+                if(dup2(fd, 1) == -1)
+                {
+                    perror("Error duplicating file descriptor");
+                    _exit(EXIT_FAILURE);
+                }
+                close(fd);
+            }
+            if (_errFile)
+            {
+                fd = open(_errFile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                if (fd == -1)
+                {
+                    perror("Error opening error file");
+                    _exit(EXIT_FAILURE);
+                }
+                if(dup2(fd, 2) == -1)
+                {
+                    perror("Error duplicating file descriptor");
+                    _exit(EXIT_FAILURE);
+                }
+                close(fd);
+            }
+        }
+        if (_inputFile)
+        {
+            fd = open(_inputFile, O_RDONLY);
+            if (fd == -1)
+            {
+                perror("Error opening input file");
+                _exit(EXIT_FAILURE);
+            }
+            if(dup2(fd, 0) == -1)
+            {
+                perror("Error duplicating file descriptor");
+                _exit(EXIT_FAILURE);
+            }
+            close(fd);
+        }
+        if (execvp(_simpleCommands[0]->_arguments[0], _simpleCommands[0]->_arguments) == -1)
         {
             perror("Error executing command");
             _exit(EXIT_FAILURE);
         }
-    
     }
     else if (pid > 0)
     {
@@ -292,7 +348,6 @@ void Command::execute()
         {
             waitpid(pid, NULL, 0);
         }
-      
     }
     else
     {
