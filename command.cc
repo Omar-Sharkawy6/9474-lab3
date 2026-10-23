@@ -264,94 +264,143 @@ void Command::execute()
     print();
     pid_t pid;
     int fd;
-    pid = fork();
-    if (pid == 0)
+    std::vector<pid_t> childPids;
+    int pipefd[2];
+    int prevRead=-1;
+    for (int i = 0; i < _numberOfSimpleCommands; i++)
     {
-        if (_out_error)
+        if (i < _numberOfSimpleCommands - 1)
         {
-            fd = open(_errFile, O_WRONLY | O_CREAT | O_APPEND, 0644);
-            if (fd == -1)
+            if (pipe(pipefd) == -1)
             {
-                perror("Error opening error file");
-                _exit(EXIT_FAILURE);
+                perror("Pipe failed");
+                exit(EXIT_FAILURE);
             }
-            if(dup2(fd, 1) == -1)
-            {
-                perror("Error duplicating file descriptor");
-                _exit(EXIT_FAILURE);
-            }
-            if(dup2(fd, 2) == -1)
-            {
-                perror("Error duplicating file descriptor");
-                _exit(EXIT_FAILURE);
-            }
-            close(fd);
         }
-        else
+        pid = fork();
+        if (pid == 0)
         {
-            if (_outFile)
+            if(prevRead != -1)
             {
-                fd = open(_outFile, _append ? O_WRONLY | O_CREAT | O_APPEND : O_WRONLY | O_CREAT | O_TRUNC, 0644);
-                if (fd == -1)
-                {
-                    perror("Error opening output file");
-                    _exit(EXIT_FAILURE);
-                }
-                if(dup2(fd, 1) == -1)
+                if (dup2(prevRead, 0) == -1)
                 {
                     perror("Error duplicating file descriptor");
                     _exit(EXIT_FAILURE);
                 }
-                close(fd);
+                close(prevRead);
             }
-            if (_errFile)
+            if (i < _numberOfSimpleCommands - 1)
             {
-                fd = open(_errFile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                close(pipefd[0]);
+                if (dup2(pipefd[1], 1) == -1)
+                {
+                    perror("Error duplicating file descriptor");
+                    _exit(EXIT_FAILURE);
+                }
+                close(pipefd[1]);
+            }
+            if (_out_error && i == _numberOfSimpleCommands - 1)
+            {
+                fd = open(_errFile, O_WRONLY | O_CREAT | O_APPEND, 0644);
                 if (fd == -1)
                 {
                     perror("Error opening error file");
                     _exit(EXIT_FAILURE);
                 }
-                if(dup2(fd, 2) == -1)
+                if (dup2(fd, 1) == -1)
+                {
+                    perror("Error duplicating file descriptor");
+                    _exit(EXIT_FAILURE);
+                }
+                if (dup2(fd, 2) == -1)
                 {
                     perror("Error duplicating file descriptor");
                     _exit(EXIT_FAILURE);
                 }
                 close(fd);
             }
-        }
-        if (_inputFile)
-        {
-            fd = open(_inputFile, O_RDONLY);
-            if (fd == -1)
+            else
             {
-                perror("Error opening input file");
+                if (_outFile && i == _numberOfSimpleCommands - 1)
+                {
+                    fd = open(_outFile, _append ? O_WRONLY | O_CREAT | O_APPEND : O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                    if (fd == -1)
+                    {
+                        perror("Error opening output file");
+                        _exit(EXIT_FAILURE);
+                    }
+                    if (dup2(fd, 1) == -1)
+                    {
+                        perror("Error duplicating file descriptor");
+                        _exit(EXIT_FAILURE);
+                    }
+                    close(fd);
+                }
+                if (_errFile && i == _numberOfSimpleCommands - 1)
+                {
+                    fd = open(_errFile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                    if (fd == -1)
+                    {
+                        perror("Error opening error file");
+                        _exit(EXIT_FAILURE);
+                    }
+                    if (dup2(fd, 2) == -1)
+                    {
+                        perror("Error duplicating file descriptor");
+                        _exit(EXIT_FAILURE);
+                    }
+                    close(fd);
+                }
+            }
+            if (_inputFile && i==0)
+            {
+                fd = open(_inputFile, O_RDONLY);
+                if (fd == -1)
+                {
+                    perror("Error opening input file");
+                    _exit(EXIT_FAILURE);
+                }
+                if (dup2(fd, 0) == -1)
+                {
+                    perror("Error duplicating file descriptor");
+                    _exit(EXIT_FAILURE);
+                }
+                close(fd);
+            }
+            if (execvp(_simpleCommands[i]->_arguments[0], _simpleCommands[i]->_arguments) == -1)
+            {
+                perror("Error executing command");
                 _exit(EXIT_FAILURE);
             }
-            if(dup2(fd, 0) == -1)
+        }
+        else if (pid > 0)
+        {
+            childPids.push_back(pid);
+            if(prevRead != -1)
             {
-                perror("Error duplicating file descriptor");
-                _exit(EXIT_FAILURE);
+                close(prevRead);
             }
-            close(fd);
+            if (i < _numberOfSimpleCommands - 1)
+            {
+                close(pipefd[1]);
+                prevRead = pipefd[0];
+            }
+            if(i==_numberOfSimpleCommands-1)
+            {
+                prevRead=-1;
+            }
         }
-        if (execvp(_simpleCommands[0]->_arguments[0], _simpleCommands[0]->_arguments) == -1)
+        else
         {
-            perror("Error executing command");
-            _exit(EXIT_FAILURE);
+            perror("Fork failed");
         }
     }
-    else if (pid > 0)
+    if (!_background)
     {
-        // Parent process
-        if (!_background)
+        for (int i = 0; i < childPids.size(); i++)
         {
-            waitpid(pid, NULL, 0);
+            waitpid(childPids[i], NULL, 0);
         }
-    }
-    else
-    {
-        perror("Fork failed");
     }
     clear();
 }
